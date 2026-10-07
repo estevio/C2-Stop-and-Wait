@@ -1,5 +1,6 @@
 import socket
 import sys
+import socketTcp
 
 """
 def recieve_full_message(socket, buff_size, end_sequence):
@@ -23,10 +24,14 @@ def send_full_message(msg, sock, buff_size, addr, end_sequence):
     msg += end_sequence
     msg_len = msg.__sizeof__()
     i = 0
-    headers = b"\x01\x00\x00"
+    tipo = b"\x00"
+    seq = 0
     while i < msg_len:
-        sock.sendto((headers + msg[i:(i+buff_size)]), addr)
-        i += buff_size
+        tcp_msg = socketTcp.MensajeTCP(tipo, seq.to_bytes(2), msg[i:(i+16)])
+        pack = socketTcp.SocketTCP.create_segment(tcp_msg)
+        print(pack)
+        sock.sendto(pack, addr)
+        i += 16
 
 def contains_end_of_message(msg, end_seq):
     return msg.endswith(end_seq)
