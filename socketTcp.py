@@ -6,7 +6,7 @@ class MensajeTCP():
     clase que representa un mensaje TCP
 
     atributos:
-        tipo (bytes): el tipo de mensaje, puede ser uno de los siguientes "SYN", "ACK", "FIN", "A+S" "A+F"
+        tipo (bytes): el tipo de mensaje, puede ser uno de los siguientes "SYN", "ACK", "FIN", "A+S", "A+F" o "MSG"
         seq (bytes): el numero de secuencia en str
         msg (bytes): el contenido del mensaje
 
@@ -34,8 +34,8 @@ class SocketTCP():
     def __init__(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.destino = ('localhost', 8000)
-        self.seq = 0
-        self.header_size = 5
+        self.seq = -1
+        self.header_size = 5 # TODO: cambiar el tamaño para tener en cuenta el tamaño de seq en char (al menos 3)
         self.msg_len = 16
         self.buf_size = self.header_size + self.msg_len
 
@@ -64,7 +64,7 @@ class SocketTCP():
             un mensaje en bytes
         """
         msg = bytearray(data.tipo)
-        msg = msg + bytearray(data.seq) + bytearray(data.msg)
+        msg = msg + bytearray(data.seq) + bytearray(data.msg) #TODO: agregar padding a seq
         return msg
 
     def bind(self, addr):
@@ -137,7 +137,7 @@ class SocketTCP():
 
             # hanshake listo!
             new_socket = SocketTCP()
-            new_socket.seq = parsed.seq
+            new_socket.seq = parsed.seq + 1
             new_socket.destino = addr
             new_addr = ('localhost', 8500)
             # direccion fija por simplicidad (no se puede crear 2 clientes al mismo tiempo)
@@ -146,3 +146,39 @@ class SocketTCP():
             
             return (new_socket, new_addr)
 
+    def send(self, msg: str):
+        """
+        envía un mensaje completo a través del socket.
+        el primer mensaje lleva el largo del mensaje en el contenido.
+        asume que la conexión fue establecida
+
+        recibe:
+            msg (str): el mensaje a enviar
+        """
+        if self.seq == -1:
+            print("conexion no fue establecida")
+            return
+
+        # enviar el primer mensaje que contiene el tamaño del mensaje
+        msg = msg.encode()
+        msg_len = msg.__sizeof__()
+        i = 0
+        tipo = b"MSG"
+        msg_tcp = MensajeTCP(tipo, str(self.seq).encode(), str(msg_len).encode())
+        pack = self.create_segment(msg_tcp)
+        self.socket.sendto(pack, self.destino)
+
+        # esperar mensaje ack
+        recv_msg, = self.socket.recvfrom(self.buf_size)
+        parsed = self.parse_segment(recv_msg)
+        if int(parsed.seq) <= self.seq:
+            print("secuencia incorrecta")
+            return
+        self.seq = int(parsed.seq) + 1 # TODO: quizas esto debiera ser el largo del mensaje enviado
+
+        while i < msg_len:
+            msg_tcp = MensajeTCP(tipo, seq.to_bytes(2), msg[i:(i+16)])
+            pack = self.create_segment(tcp_msg)
+            print(pack)
+            sock.sendto(pack, addr)
+            i += 16
