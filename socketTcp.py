@@ -3,17 +3,14 @@ from random import randint
 
 class MensajeTCP():
     """
-    tipo (bytes): el tipo de mensaje, tiene largo 1
-        0: SYN
-        1: ACK
-        2: FIN
-        3: SYN + ACK
-        4: FIN + ACK
+    tipo (bytes): el tipo de mensaje, puede ser uno de los siguientes "SYN", "ACK", "FIN", "A+S" "A+F"
+    seq (bytes): el numero de secuencia en str
+    msg (bytes): el contenido del mensaje
 
-    seq (bytes): el numero de secuencia
+    todos los campos son caracteres
     """
 
-    def __init__(self, tipo: bytes, seq: bytes = 0, msg: bytes = b""):
+    def __init__(self, tipo: bytes, seq: bytes = b"0", msg: bytes = b""):
         self.tipo = tipo
         self.seq = seq
         self.msg = msg
@@ -24,11 +21,13 @@ class SocketTCP():
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.destino = ('localhost', 8000)
         self.seq = 0
-        self.buf_size = 19
+        self.header_size = 5
+        self.msg_len = 16
+        self.buf_size = self.header_size + self.msg_len
 
     @staticmethod
     def parse_segment(msg: bytes):
-        return MensajeTCP(msg[0], msg[1:3], msg[3:])        
+        return MensajeTCP(msg[0:3], msg[3:5], msg[5:])
 
     @staticmethod
     def create_segment(data: MensajeTCP):
@@ -40,39 +39,59 @@ class SocketTCP():
         self.socket.bind(addr)
 
     def connect(self, addr):
-        seq = randint(0, 100)
-        msg = MensajeTCP(b"\x00", seq.to_bytes)
-        to_send = self.create_segment(msg)
+        print("conectando")
+        self.seq = randint(0, 100)
         # enviar un mensaje syn
-        self.socket.sendto(msg, addr)
-        rcv_msg, serv_addr = self.socket.recvfrom(to_send)
+        msg = MensajeTCP(b"SYN", str(self.seq).encode())
+        to_send = self.create_segment(msg)
+        self.socket.sendto(to_send, addr)
+        # recibir un mensaje devuelta
+        rcv_msg, serv_addr = self.socket.recvfrom(19)
         # verificar ack, syn y addr
         parsed = self.parse_segment(rcv_msg)
-        if parsed.tipo != b"\x03" or parsed.seq <= seq or addr != serv_addr:
+        if parsed.tipo != b"A+S" or int(parsed.seq) <= self.seq:
+            # en este momento no se checkea addr
             print("Hanshake no puede continuar")
+            print(f"tipo: {parsed.tipo}\nseqs: {parsed.seq} <= {self.seq}\naddrs: {addr} {serv_addr}")
             return
-        seq = int(parsed.seq) + 1
-        msg = MensajeTCP(b"\x01", seq.to_bytes)
+        print("mensaje syn + ack recibido")
+        self.seq = int(parsed.seq) + 1
+        # enviar mensaje ack
+        msg = MensajeTCP(b"ACK", str(self.seq).encode())
+        to_send = self.create_segment(msg)
+        self.socket.sendto(to_send, addr)
+        print("conexion establecida!!")
 
     def accept(self):
         while True:
+            print("recibiendo solicitudes")
             recv_msg, addr = self.socket.recvfrom(self.buf_size)
             parsed = self.parse_segment(recv_msg)
-            if parsed.tipo != b"\x00":
+            if parsed.tipo != b"SYN":
+                print("mensaje no es de tipo SYN")
                 continue
-            seq = int(parsed.seq) + 1
-            to_send = self.create_segment(b"\x03", seq.to_bytes)
+            print("mensaje tipo syn recibido!")
+            # enviar mensaje syn + ack
+            self.seq = int(parsed.seq) + 1
+            to_send = self.create_segment(MensajeTCP(b"A+S", str(self.seq).encode()))
             self.socket.sendto(to_send, addr)
-
+            print("mensaje tipo syn+ack enviado!")
+            # recibir mensaje tipo ack
             recv_msg, addr_2 = self.socket.recvfrom(self.buf_size)
             parsed = self.parse_segment(recv_msg)
-            if parsed.tipo != b"\x01" or addr != addr_2:
+            if parsed.tipo != b"ACK" or addr != addr_2 or int(parsed.seq) <= self.seq:
+                print("tipo, addr o seq equivocado")
                 continue
+            print("mensaje tipo ack recibido!")
 
             # hanshake listo!
             new_socket = SocketTCP()
             new_socket.seq = parsed.seq
             new_socket.destino = addr
+            new_addr = ('localhost', 8500)
             # direccion fija por simplicidad (no se puede crear 2 clientes al mismo tiempo)
-            new_socket.bind(('localhost', 8500))
+            new_socket.bind(new_addr)
+            print("conexion establecida!!")
+            
+            return (new_socket, new_addr)
 
