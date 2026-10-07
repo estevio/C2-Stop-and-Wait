@@ -23,8 +23,9 @@ def send_full_message(msg, sock, buff_size, addr, end_sequence):
     msg += end_sequence
     msg_len = msg.__sizeof__()
     i = 0
+    headers = b"\x01\x00\x00"
     while i < msg_len:
-        sock.sendto((msg[i:(i+buff_size)]), addr)
+        sock.sendto((headers + msg[i:(i+buff_size)]), addr)
         i += buff_size
 
 def contains_end_of_message(msg, end_seq):
@@ -41,7 +42,7 @@ if __name__ == "__main__":
 
     end_sequence = b"end-of-message"
     server_address = (sys.argv[1], int(sys.argv[2]))
-    buff_size = 16
+    buff_size = 19
 
     print("Creando socket - Cliente")
 
