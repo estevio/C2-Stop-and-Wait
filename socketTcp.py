@@ -3,9 +3,12 @@ from random import randint
 
 class MensajeTCP():
     """
-    tipo (bytes): el tipo de mensaje, puede ser uno de los siguientes "SYN", "ACK", "FIN", "A+S" "A+F"
-    seq (bytes): el numero de secuencia en str
-    msg (bytes): el contenido del mensaje
+    clase que representa un mensaje TCP
+
+    atributos:
+        tipo (bytes): el tipo de mensaje, puede ser uno de los siguientes "SYN", "ACK", "FIN", "A+S" "A+F"
+        seq (bytes): el numero de secuencia en str
+        msg (bytes): el contenido del mensaje
 
     todos los campos son caracteres
     """
@@ -16,6 +19,17 @@ class MensajeTCP():
         self.msg = msg
 
 class SocketTCP():
+    """
+    clase que representa un socket TCP
+
+    atributos:
+        socket: un socket no orientado a conexión
+        destino: dirección de destino de los mensajes
+        seq (int): numero de secuencia validador del orden de los mensajes
+        header_size (int): tamaño del header de un mensaje (tipo, seq)
+        msg_len (int): tamaño máximo del contenido de un mensaje
+        buf_size (int): tamaño del buffer (header_size + buf_size)
+    """
 
     def __init__(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -27,18 +41,49 @@ class SocketTCP():
 
     @staticmethod
     def parse_segment(msg: bytes):
+        """
+        recibe un mensaje tcp en bytes y retorna un objeto MensajeTCP que lo representa
+
+        recibe:
+            msg (bytes): el mensaje en bytes
+
+        retorna:
+            un objeto MensajeTCP
+        """
         return MensajeTCP(msg[0:3], msg[3:5], msg[5:])
 
     @staticmethod
     def create_segment(data: MensajeTCP):
+        """
+        crea un mensaje en bytes a partir de un objeto MensajeTCP
+
+        recibe:
+            data (MensajeTCP): la información que va en el mensaje
+
+        retorna:
+            un mensaje en bytes
+        """
         msg = bytearray(data.tipo)
         msg = msg + bytearray(data.seq) + bytearray(data.msg)
         return msg
 
     def bind(self, addr):
+        """
+        hace el bind del socket a la dirección dada
+
+        recibe:
+            addr: la dirección en la que el socket escucha
+        """
         self.socket.bind(addr)
 
     def connect(self, addr):
+        """
+        establece una conexión mediante 3-way handshake.
+        envía la primera solicitud
+
+        recibe:
+            addr: la dirección del servidor
+        """
         print("conectando")
         self.seq = randint(0, 100)
         # enviar un mensaje syn
@@ -63,6 +108,12 @@ class SocketTCP():
         print("conexion establecida!!")
 
     def accept(self):
+        """
+        escucha por solicitudes a conexión y las acepta mediante 3-way handshake
+
+        retorna:
+            (SocketTCP para la conexión, dirección del SocketTCP)
+        """
         while True:
             print("recibiendo solicitudes")
             recv_msg, addr = self.socket.recvfrom(self.buf_size)
