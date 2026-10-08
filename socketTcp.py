@@ -29,7 +29,7 @@ class SocketTCP():
         header_size (int): tamaño del header de un mensaje (tipo, seq)
         msg_len (int): tamaño máximo del contenido de un mensaje
         buf_size (int): tamaño del buffer (header_size + buf_size)
-        timeout (int): segundos de espera máxima entre mensajes en stop and wait
+        expecting (int): largo del contenido que se espera
     """
 
     def __init__(self):
@@ -39,7 +39,8 @@ class SocketTCP():
         self.header_size = 5 # TODO: cambiar el tamaño para tener en cuenta el tamaño de seq en char (al menos 3)
         self.msg_len = 16
         self.buf_size = self.header_size + self.msg_len
-        self.timeout = 3
+        self.expecting = 0
+        self.socket.settimeout(10) # espera 10 segundos antes de reenviar
 
     @staticmethod
     def parse_segment(msg: bytes):
@@ -92,7 +93,7 @@ class SocketTCP():
         to_send = self.create_segment(msg)
         self.socket.sendto(to_send, addr)
         # recibir un mensaje devuelta
-        rcv_msg, serv_addr = self.socket.recvfrom(19)
+        rcv_msg, serv_addr = self.socket.recvfrom(19) # TODO: esta direccion deberia ser la del nuevo socket?
         # verificar ack, syn y addr
         parsed = self.parse_segment(rcv_msg)
         if parsed.tipo != b"A+S" or parsed.seq <= self.seq:
@@ -101,11 +102,12 @@ class SocketTCP():
             print(f"tipo: {parsed.tipo}\nseqs: {parsed.seq} <= {self.seq}\naddrs: {addr} {serv_addr}")
             return
         print("mensaje syn + ack recibido")
+        self.destino = serv_addr
         self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
         # enviar mensaje ack
         msg = MensajeTCP(b"ACK", self.seq)
         to_send = self.create_segment(msg)
-        self.socket.sendto(to_send, addr)
+        self.socket.sendto(to_send, self.destino)
         print("conexion establecida!!")
 
     def accept(self):
@@ -123,49 +125,44 @@ class SocketTCP():
                 print("mensaje no es de tipo SYN")
                 continue
             print("mensaje tipo syn recibido!")
-            # enviar mensaje syn + ack
-            self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
-            to_send = self.create_segment(MensajeTCP(b"A+S", self.seq))
-            self.socket.sendto(to_send, addr)
-            print("mensaje tipo syn+ack enviado!")
-            # recibir mensaje tipo ack
-            recv_msg, addr_2 = self.socket.recvfrom(self.buf_size)
-            parsed = self.parse_segment(recv_msg)
-            if parsed.tipo != b"ACK" or addr != addr_2 or parsed.seq <= self.seq:
-                print("tipo, addr o seq equivocado")
-                continue
-            print("mensaje tipo ack recibido!")
-
-            # hanshake listo!
+            # crear un nuevo socket para la comunicacion
             new_socket = SocketTCP()
             new_socket.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
             new_socket.destino = addr
             new_addr = ('localhost', 8500)
             # direccion fija por simplicidad (no se puede crear 2 clientes al mismo tiempo)
             new_socket.bind(new_addr)
+            # enviar mensaje syn + ack
+            to_send = self.create_segment(MensajeTCP(b"A+S", new_socket.seq))
+            new_socket.socket.sendto(to_send, addr)
+            print("mensaje tipo syn+ack enviado!")
+            # recibir mensaje tipo ack
+            recv_msg, addr_2 = new_socket.socket.recvfrom(self.buf_size)
+            parsed = self.parse_segment(recv_msg)
+            if parsed.tipo != b"ACK" or addr != addr_2 or parsed.seq <= new_socket.seq:
+                print("tipo, addr o seq equivocado")
+                continue
+            print("mensaje tipo ack recibido!")
             print("conexion establecida!!")
-            
             return (new_socket, new_addr)
 
-    def send(self, msg: str):
+    def send(self, msg: bytes):
         """
         envía un mensaje completo a través del socket.
         el primer mensaje lleva el largo del mensaje en el contenido.
         asume que la conexión fue establecida
 
         recibe:
-            msg (str): el mensaje a enviar
+            msg (bytes): el mensaje a enviar
         """
         if self.seq == b"":
             print("conexion no fue establecida")
             return
+        print(f"mensaje completo por enviar: {msg.decode()}")
 
-        # TODO: mover el timer al principio cuando ya este implementado el manejo de perdidas
-        self.socket.settimeout(self.timeout)
         # enviar el primer mensaje que contiene el tamaño del mensaje
-        msg = msg.encode()
-        full_msg_len = msg.__sizeof__()
-        self._send_pack(full_msg_len)
+        full_msg_len = len(msg)
+        self._send_pack(str(full_msg_len).encode())
         i = 0
         while i < full_msg_len:
             # enviar 16 bytes de mensaje
@@ -173,26 +170,59 @@ class SocketTCP():
             i += self.msg_len
 
     def _send_pack(self, content: bytes):
+        # TODO: ahora se pierden datos si el mensaje es más largo que buff_size (solo se elimina)
+        print(f"contenido a mandar: {content.decode()} a direccion {self.destino}")
         tipo = b"MSG"
         msg_tcp = MensajeTCP(tipo, self.seq, content)
         pack = self.create_segment(msg_tcp)
         self.socket.sendto(pack, self.destino)
 
-        # esperar mensaje ack
         # caso 1: todo bien
         try:
-            recv_msg, = self.socket.recvfrom(self.buf_size)
+            recv_msg, addr= self.socket.recvfrom(self.buf_size)
             parsed = self.parse_segment(recv_msg)
-            if int(parsed.seq) <= self.seq:
+            if parsed.seq <= self.seq:
                 print("secuencia incorrecta")
-                return
-            # TODO: quizas esto debiera ser el largo del mensaje enviado u otro numero que permita verificar
-            self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+                self._send_pack(content)
+            else:
+                print("enviando mensaje")
+                # TODO: quizas esto debiera ser el largo del mensaje enviado u otro numero que permita verificar
+                self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
         # caso 2: no se recibe el mensaje de confirmación
         except TimeoutError:
-            print("error de timeout en send, reenviando el mensaje")
+            print(f"\nerror de timeout en send\ncontenido del mensaje:\ntipo: {msg_tcp.tipo}\nseq: {msg_tcp.seq}")
             self._send_pack(content)
-
-
-
-
+        
+    def recv(self, buff_size):
+        # caso 1: primer mensaje (msg_len)
+        print("recibiendo el largo del mensaje")
+        if self.expecting == 0:
+            self.expecting = int(self._recv_pack().decode())
+        # caso 2: continuacion del mensaje
+        recv_msg = b""
+        pack_len = min(self.expecting, buff_size)
+        while pack_len > 0:
+            recv_content = self._recv_pack()
+            self.expecting -= len(recv_content)
+            pack_len -= len(recv_content)
+            recv_msg += recv_content
+        return recv_msg[:buff_size]
+            
+    def _recv_pack(self):
+        try:
+            recv_msg, addr = self.socket.recvfrom(self.buf_size)
+            parsed = self.parse_segment(recv_msg)
+            if parsed.seq <= self.seq:
+                print("secuencia incorrecta")
+                self._recv_pack()
+            elif parsed.tipo != b"MSG":
+                print(f"tipo incorrecto, recibido: {parsed.tipo}")
+                self._recv_pack()
+            else:
+                self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+                self.socket.sendto(self.create_segment(MensajeTCP(b"ACK", self.seq)), self.destino)
+                print(f"contenido recibido: {parsed.msg.decode()}")
+                return parsed.msg
+        except TimeoutError:
+            print("error de timeout en recv")
+            self._recv_pack()
