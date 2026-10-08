@@ -29,6 +29,7 @@ class SocketTCP():
         header_size (int): tamaño del header de un mensaje (tipo, seq)
         msg_len (int): tamaño máximo del contenido de un mensaje
         buf_size (int): tamaño del buffer (header_size + buf_size)
+        timeout (int): segundos de espera máxima entre mensajes en stop and wait
     """
 
     def __init__(self):
@@ -38,6 +39,7 @@ class SocketTCP():
         self.header_size = 5 # TODO: cambiar el tamaño para tener en cuenta el tamaño de seq en char (al menos 3)
         self.msg_len = 16
         self.buf_size = self.header_size + self.msg_len
+        self.timeout = 3
 
     @staticmethod
     def parse_segment(msg: bytes):
@@ -154,30 +156,43 @@ class SocketTCP():
         recibe:
             msg (str): el mensaje a enviar
         """
-        if self.seq == -1:
+        if self.seq == b"":
             print("conexion no fue establecida")
             return
 
+        # TODO: mover el timer al principio cuando ya este implementado el manejo de perdidas
+        self.socket.settimeout(self.timeout)
         # enviar el primer mensaje que contiene el tamaño del mensaje
         msg = msg.encode()
-        msg_len = msg.__sizeof__()
+        full_msg_len = msg.__sizeof__()
+        self._send_pack(full_msg_len)
         i = 0
+        while i < full_msg_len:
+            # enviar 16 bytes de mensaje
+            self._send_pack(msg[i:i+self.msg_len])
+            i += self.msg_len
+
+    def _send_pack(self, content: bytes):
         tipo = b"MSG"
-        msg_tcp = MensajeTCP(tipo, str(self.seq).encode(), str(msg_len).encode())
+        msg_tcp = MensajeTCP(tipo, self.seq, content)
         pack = self.create_segment(msg_tcp)
         self.socket.sendto(pack, self.destino)
 
         # esperar mensaje ack
-        recv_msg, = self.socket.recvfrom(self.buf_size)
-        parsed = self.parse_segment(recv_msg)
-        if int(parsed.seq) <= self.seq:
-            print("secuencia incorrecta")
-            return
-        self.seq = int(parsed.seq) + 1 # TODO: quizas esto debiera ser el largo del mensaje enviado
+        # caso 1: todo bien
+        try:
+            recv_msg, = self.socket.recvfrom(self.buf_size)
+            parsed = self.parse_segment(recv_msg)
+            if int(parsed.seq) <= self.seq:
+                print("secuencia incorrecta")
+                return
+            # TODO: quizas esto debiera ser el largo del mensaje enviado u otro numero que permita verificar
+            self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+        # caso 2: no se recibe el mensaje de confirmación
+        except TimeoutError:
+            print("error de timeout en send, reenviando el mensaje")
+            self._send_pack(content)
 
-        while i < msg_len:
-            msg_tcp = MensajeTCP(tipo, seq.to_bytes(2), msg[i:(i+16)])
-            pack = self.create_segment(tcp_msg)
-            print(pack)
-            sock.sendto(pack, addr)
-            i += 16
+
+
+
