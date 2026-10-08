@@ -13,7 +13,7 @@ class MensajeTCP():
     todos los campos son caracteres
     """
 
-    def __init__(self, tipo: bytes, seq: bytes = b"0", msg: bytes = b""):
+    def __init__(self, tipo: bytes, seq: bytes = b"\00", msg: bytes = b""):
         self.tipo = tipo
         self.seq = seq
         self.msg = msg
@@ -25,7 +25,7 @@ class SocketTCP():
     atributos:
         socket: un socket no orientado a conexión
         destino: dirección de destino de los mensajes
-        seq (int): numero de secuencia validador del orden de los mensajes
+        seq (bytes): numero de secuencia validador del orden de los mensajes
         header_size (int): tamaño del header de un mensaje (tipo, seq)
         msg_len (int): tamaño máximo del contenido de un mensaje
         buf_size (int): tamaño del buffer (header_size + buf_size)
@@ -34,7 +34,7 @@ class SocketTCP():
     def __init__(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.destino = ('localhost', 8000)
-        self.seq = -1
+        self.seq = b""
         self.header_size = 5 # TODO: cambiar el tamaño para tener en cuenta el tamaño de seq en char (al menos 3)
         self.msg_len = 16
         self.buf_size = self.header_size + self.msg_len
@@ -63,8 +63,7 @@ class SocketTCP():
         retorna:
             un mensaje en bytes
         """
-        msg = bytearray(data.tipo)
-        msg = msg + bytearray(data.seq) + bytearray(data.msg) #TODO: agregar padding a seq
+        msg = data.tipo + data.seq + data.msg #TODO: agregar padding a seq
         return msg
 
     def bind(self, addr):
@@ -85,24 +84,24 @@ class SocketTCP():
             addr: la dirección del servidor
         """
         print("conectando")
-        self.seq = randint(0, 100)
+        self.seq = randint(0, 100).to_bytes(2)
         # enviar un mensaje syn
-        msg = MensajeTCP(b"SYN", str(self.seq).encode())
+        msg = MensajeTCP(b"SYN", self.seq)
         to_send = self.create_segment(msg)
         self.socket.sendto(to_send, addr)
         # recibir un mensaje devuelta
         rcv_msg, serv_addr = self.socket.recvfrom(19)
         # verificar ack, syn y addr
         parsed = self.parse_segment(rcv_msg)
-        if parsed.tipo != b"A+S" or int(parsed.seq) <= self.seq:
+        if parsed.tipo != b"A+S" or parsed.seq <= self.seq:
             # en este momento no se checkea addr
             print("Hanshake no puede continuar")
             print(f"tipo: {parsed.tipo}\nseqs: {parsed.seq} <= {self.seq}\naddrs: {addr} {serv_addr}")
             return
         print("mensaje syn + ack recibido")
-        self.seq = int(parsed.seq) + 1
+        self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
         # enviar mensaje ack
-        msg = MensajeTCP(b"ACK", str(self.seq).encode())
+        msg = MensajeTCP(b"ACK", self.seq)
         to_send = self.create_segment(msg)
         self.socket.sendto(to_send, addr)
         print("conexion establecida!!")
@@ -123,21 +122,21 @@ class SocketTCP():
                 continue
             print("mensaje tipo syn recibido!")
             # enviar mensaje syn + ack
-            self.seq = int(parsed.seq) + 1
-            to_send = self.create_segment(MensajeTCP(b"A+S", str(self.seq).encode()))
+            self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+            to_send = self.create_segment(MensajeTCP(b"A+S", self.seq))
             self.socket.sendto(to_send, addr)
             print("mensaje tipo syn+ack enviado!")
             # recibir mensaje tipo ack
             recv_msg, addr_2 = self.socket.recvfrom(self.buf_size)
             parsed = self.parse_segment(recv_msg)
-            if parsed.tipo != b"ACK" or addr != addr_2 or int(parsed.seq) <= self.seq:
+            if parsed.tipo != b"ACK" or addr != addr_2 or parsed.seq <= self.seq:
                 print("tipo, addr o seq equivocado")
                 continue
             print("mensaje tipo ack recibido!")
 
             # hanshake listo!
             new_socket = SocketTCP()
-            new_socket.seq = parsed.seq + 1
+            new_socket.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
             new_socket.destino = addr
             new_addr = ('localhost', 8500)
             # direccion fija por simplicidad (no se puede crear 2 clientes al mismo tiempo)
