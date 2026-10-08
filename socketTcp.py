@@ -30,6 +30,7 @@ class SocketTCP():
         msg_len (int): tamaño máximo del contenido de un mensaje
         buf_size (int): tamaño del buffer (header_size + buf_size)
         expecting (int): largo del contenido que se espera
+        cach (bytes): mensaje que sobra respecto al tamaño del buffer
     """
 
     def __init__(self):
@@ -41,6 +42,7 @@ class SocketTCP():
         self.buf_size = self.header_size + self.msg_len
         self.expecting = 0
         self.socket.settimeout(10) # espera 10 segundos antes de reenviar
+        self.cach = b""
 
     @staticmethod
     def parse_segment(msg: bytes):
@@ -199,13 +201,14 @@ class SocketTCP():
         if self.expecting == 0:
             self.expecting = int(self._recv_pack().decode())
         # caso 2: continuacion del mensaje
-        recv_msg = b""
+        recv_msg = self.cach
         pack_len = min(self.expecting, buff_size)
         while pack_len > 0:
             recv_content = self._recv_pack()
             self.expecting -= len(recv_content)
             pack_len -= len(recv_content)
             recv_msg += recv_content
+        self.cach = recv_msg[buff_size:]
         return recv_msg[:buff_size]
             
     def _recv_pack(self):
