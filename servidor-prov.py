@@ -1,9 +1,9 @@
 import socket
-import socketTcp
+import SocketTCP
 
 def recieve_full_message(socket, buff_size, end_sequence):
     recv_message, server_address = socket.recvfrom(buff_size)
-    tcp_msg = socketTcp.SocketTCP.parse_segment(recv_message)
+    tcp_msg = SocketTCP.SocketTCP.parse_segment(recv_message)
     full_message = tcp_msg.msg
     print(f"tipo: {tcp_msg.tipo}, seq: {tcp_msg.seq}\nmsg: {tcp_msg.msg}")
     current_server_address = server_address
@@ -11,7 +11,7 @@ def recieve_full_message(socket, buff_size, end_sequence):
 
     while not is_end:
         recv_message, server_address = socket.recvfrom(buff_size)
-        tcp_msg = socketTcp.SocketTCP.parse_segment(recv_message)
+        tcp_msg = SocketTCP.SocketTCP.parse_segment(recv_message)
         print(f"msg: {tcp_msg.msg}")
         full_message += tcp_msg.msg
         is_end = contains_end_of_message(full_message, end_sequence)

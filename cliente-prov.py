@@ -1,6 +1,6 @@
 import socket
 import sys
-import socketTcp
+import SocketTCP
 
 """
 def recieve_full_message(socket, buff_size, end_sequence):
@@ -27,8 +27,8 @@ def send_full_message(msg, sock, buff_size, addr, end_sequence):
     tipo = b"\x00"
     seq = 0
     while i < msg_len:
-        tcp_msg = socketTcp.MensajeTCP(tipo, seq.to_bytes(2), msg[i:(i+16)])
-        pack = socketTcp.SocketTCP.create_segment(tcp_msg)
+        tcp_msg = SocketTCP.MensajeTCP(tipo, seq.to_bytes(2), msg[i:(i+16)])
+        pack = SocketTCP.SocketTCP.create_segment(tcp_msg)
         print(pack)
         sock.sendto(pack, addr)
         i += 16
@@ -53,11 +53,10 @@ if __name__ == "__main__":
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    msg = ""
     while True:
         try:
-            msg = msg + "\n" + input()
+            send_full_message(input(), client_socket, buff_size, server_address, end_sequence)
         except EOFError as e:
             break
 
-    send_full_message(msg, client_socket, buff_size, server_address, end_sequence)
+    
