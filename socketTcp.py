@@ -41,7 +41,7 @@ class SocketTCP():
         self.msg_len = 16
         self.buf_size = self.header_size + self.msg_len
         self.expecting = 0
-        self.socket.settimeout(10) # espera 10 segundos antes de reenviar
+        self.socket.settimeout(5) # espera 5 segundos antes de reenviar
         self.cach = b""
         self.last_sent = b""
 
@@ -227,6 +227,11 @@ class SocketTCP():
                     print("enviando confirmacion anterior")
                     self.socket.sendto(self.last_sent, self.destino)
                     self._send_pack(content)
+                elif parsed.tipo == b"FIN":
+                    print("se ha recibido un mensaje tipo FIN")
+                    # self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+                    self.recv_close()
+                    return
                 else:
                     print("mensaje enviado con confirmacion recibida")
                     # TODO: quizas esto debiera ser el largo del mensaje enviado u otro numero que permita verificar
@@ -275,6 +280,11 @@ class SocketTCP():
                 print("reenviando ultimo mensaje")
                 self.socket.sendto(self.last_sent, self.destino)
                 return self._recv_pack()
+            elif parsed.tipo == b"FIN":
+                print("se ha recibido un mensaje tipo FIN")
+                # self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+                self.recv_close()
+                return
             elif parsed.tipo != b"MSG":
                 print(f"tipo incorrecto, recibido: {parsed.tipo}")
                 return
@@ -288,3 +298,65 @@ class SocketTCP():
         except TimeoutError:
             print("error de timeout en recv")
             return self._recv_pack()
+
+    def close(self):
+        to_send = self.create_segment(MensajeTCP(b"FIN", self.seq))
+        tries = 0
+        while tries < 3:
+            try:
+                print(f"enviando mensaje fin")
+                print(f"{to_send}")
+                self.socket.sendto(to_send, self.destino)
+                recv_msg, _ = self.socket.recvfrom(self.buf_size)
+                parsed = self.parse_segment(recv_msg)
+                print(f"tipo: {parsed.tipo}, seqs: {int.from_bytes(self.seq)} < {int.from_bytes(parsed.seq)}")
+                if parsed.tipo == b"A+F":
+                    print("mensaje tipo A+F recibido")
+                    self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+                    break
+
+            except TimeoutError:
+                print("timeout en fin")
+                tries += 1
+            
+        if tries < 3:
+            tries = 0
+            to_send = self.create_segment(MensajeTCP(b"ACK", self.seq))
+            print(f"{to_send}")
+
+        while tries < 3:
+            try:
+                self.socket.sendto(to_send, self.destino)
+                print("mensaje enviado")
+                self.socket.recvfrom(self.buf_size)
+            except TimeoutError:
+                tries += 1
+                print(f"timeout error en close, intento # {tries}")
+            except:
+                print("otro error en close, quizas el socket ya se cerró??")
+                break
+
+        self.socket.close()
+
+    def recv_close(self):
+        to_send = self.create_segment(MensajeTCP(b"A+F", self.seq))
+        tries = 0
+        while tries < 3:
+            try:
+                print("enviando mensaje tipo A+F")
+                print(f"{to_send}")
+                self.socket.sendto(to_send, self.destino)
+                recv_msg, _ = self.socket.recvfrom(self.buf_size)
+                parsed = self.parse_segment(recv_msg)
+                print(f"tipo: {parsed.tipo}, seqs: {int.from_bytes(self.seq)} < {int.from_bytes(parsed.seq)}")
+                if parsed.tipo == b"ACK" and self.seq < parsed.seq:
+                    print("mensaje tipo ACK recibido")
+                    break
+            except TimeoutError:
+                print("timeout error en recv_close")
+                tries += 1
+            except: 
+                print("otro error en close, quizas el socket ya se cerró??")
+                break
+
+        self.socket.close()

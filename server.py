@@ -28,3 +28,8 @@ message_part_2 = connection_socketTCP.recv(buff_size)
 print("Test 3 received:", message_part_1 + message_part_2)
 if (message_part_1 + message_part_2) == "Mensaje de largo 19".encode(): print("Test 3: Passed")
 else: print("Test 3: Failed")
+
+try:
+    connection_socketTCP.send(full_message)
+except Exception as e:
+    print(f"se reportó el error {e}")
