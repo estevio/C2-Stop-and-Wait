@@ -31,19 +31,22 @@ class SocketTCP():
         buf_size (int): tamaño del buffer (header_size + buf_size)
         expecting (int): largo del contenido que se espera
         cach (bytes): mensaje que sobra respecto al tamaño del buffer
+        last_sent (bytes): el ultimo mensaje de cinfirmacion enviado
+        debug (bool): imprime mensajes que indican el manejo de perdidas
     """
 
     def __init__(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.destino = ('localhost', 8000)
         self.seq = b""
-        self.header_size = 5 # TODO: cambiar el tamaño para tener en cuenta el tamaño de seq en char (al menos 3)
+        self.header_size = 5
         self.msg_len = 16
         self.buf_size = self.header_size + self.msg_len
         self.expecting = 0
         self.socket.settimeout(5) # espera 5 segundos antes de reenviar
         self.cach = b""
         self.last_sent = b""
+        self.debug = False
 
     @staticmethod
     def parse_segment(msg: bytes):
@@ -89,36 +92,33 @@ class SocketTCP():
         recibe:
             addr: la dirección del servidor
         """
-        print("conectando")
+        self.debug_prints("conectando")
         self.seq = randint(0, 100).to_bytes(2)
-        print(f"seq: {int.from_bytes(self.seq)}")
         # enviar un mensaje syn
         msg = MensajeTCP(b"SYN", self.seq)
         to_send = self.create_segment(msg)
         while True:
             while True:
-                print(f"seq: {int.from_bytes(self.seq)}")
                 try:
                     self.socket.sendto(to_send, addr)
                     # recibir un mensaje devuelta
                     rcv_msg, serv_addr = self.socket.recvfrom(19) # TODO: esta direccion deberia ser la del nuevo socket?
                     break
                 except TimeoutError:
-                    print("timeout en connect (mensaje confirmacion)")
+                    self.debug_prints("timeout en connect (mensaje confirmacion)")
                     continue
 
             # verificar ack, syn y addr
             parsed = self.parse_segment(rcv_msg)
             if parsed.tipo != b"A+S":
-                print("tipo equivocado (esperado A+S)")
-                print(f"tipo: {parsed.tipo.decode()}")
+                self.debug_prints("tipo equivocado (esperado A+S)")
+                self.debug_prints(f"tipo: {parsed.tipo.decode()}")
                 
             elif parsed.seq <= self.seq:
-                print("Secuencia incorrecta")
-                print(f"seqs: {int.from_bytes(parsed.seq)} <= {int.from_bytes(self.seq)}")
+                self.debug_prints("Secuencia incorrecta")
+                self.debug_prints(f"seqs: {int.from_bytes(parsed.seq)} <= {int.from_bytes(self.seq)}")
                 
             else:
-                print("mensaje syn + ack recibido")
                 self.destino = serv_addr
                 self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
                 # enviar mensaje ack
@@ -126,7 +126,7 @@ class SocketTCP():
                 to_send = self.create_segment(msg)
                 self.socket.sendto(to_send, self.destino)
                 self.last_sent = to_send
-                print("conexion establecida!!")
+                self.debug_prints("conexion establecida!!")
                 break
 
     def accept(self):
@@ -137,22 +137,21 @@ class SocketTCP():
             (SocketTCP para la conexión, dirección del SocketTCP)
         """
         while True:
-            print("recibiendo solicitudes")
+            self.debug_prints("recibiendo solicitudes")
             try:
                 recv_msg, addr = self.socket.recvfrom(self.buf_size)
                 parsed = self.parse_segment(recv_msg)
                 if parsed.tipo != b"SYN":
-                    print("mensaje no es de tipo SYN")
+                    self.debug_prints("mensaje no es de tipo SYN")
                     continue
-                print("mensaje tipo syn recibido!")
+
             except TimeoutError:
-                print("error de timeout en accept (primer mensaje)")
+                self.debug_prints("error de timeout en accept (primer mensaje)")
                 continue
 
             # crear un nuevo socket para la comunicacion
             new_socket = SocketTCP()
             new_socket.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
-            print(f"new_skt.seq: {int.from_bytes(new_socket.seq)}")
             new_socket.destino = addr
             new_addr = ('localhost', 8500)
             # direccion fija por simplicidad (no se puede crear 2 clientes al mismo tiempo)
@@ -163,25 +162,22 @@ class SocketTCP():
             while True:
                 try:
                     new_socket.socket.sendto(to_send, addr)
-                    print("mensaje tipo syn+ack enviado!")
                     # recibir mensaje tipo ack
                     recv_msg, addr_2 = new_socket.socket.recvfrom(self.buf_size)
                     parsed = self.parse_segment(recv_msg)
-                    print(f"parsed.seq: {int.from_bytes(parsed.seq)}, skt.seq: {int.from_bytes(new_socket.seq)}")
                     if parsed.tipo == b"MSG":
-                        print("hanshake incompleto, pero continuando")
+                        self.debug_prints("hanshake incompleto, pero continuando")
                         break
                     elif parsed.seq <= new_socket.seq:
-                        print("error de secuencia en accept (mensaje de confirmacion)")
+                        self.debug_prints("error de secuencia en accept (mensaje de confirmacion)")
                     elif parsed.tipo == b"ACK":
-                        print("mensaje ack recibido!")
                         break
                     else:
                         continue
                 except TimeoutError:
-                    print("error de timeout en accept (mensaje de confirmacion)")
+                    self.debug_prints("error de timeout en accept (mensaje de confirmacion)")
 
-            print("conexion establecida!!")
+            self.debug_prints("conexion establecida!!")
             return (new_socket, new_addr)
 
     def send(self, msg: bytes):
@@ -194,10 +190,9 @@ class SocketTCP():
             msg (bytes): el mensaje a enviar
         """
         if self.seq == b"":
-            print("conexion no fue establecida")
+            self.debug_prints("conexion no fue establecida")
             return
-        print(f"mensaje completo por enviar: {msg.decode()}")
-        print(f"seq actual: {int.from_bytes(self.seq)}")
+        self.debug_prints(f"mensaje completo por enviar: {msg.decode()}")
 
         # enviar el primer mensaje que contiene el tamaño del mensaje
         full_msg_len = len(msg)
@@ -209,8 +204,7 @@ class SocketTCP():
             i += self.msg_len
 
     def _send_pack(self, content: bytes):
-        print(f"contenido a mandar: {content.decode()} a direccion {self.destino}")
-        print(f"seq actual: {int.from_bytes(self.seq)}")
+
         tipo = b"MSG"
         msg_tcp = MensajeTCP(tipo, self.seq, content)
         pack = self.create_segment(msg_tcp)
@@ -223,28 +217,24 @@ class SocketTCP():
                 recv_msg, addr= self.socket.recvfrom(self.buf_size)
                 parsed = self.parse_segment(recv_msg)
                 if parsed.seq <= self.seq:
-                    print(f"secuencia incorrecta en confirmacion de send: {int.from_bytes(parsed.seq)} <= {int.from_bytes(self.seq)}")
-                    print("enviando confirmacion anterior")
+                    self.debug_prints(f"secuencia incorrecta en confirmacion de send: {int.from_bytes(parsed.seq)} <= {int.from_bytes(self.seq)}")
+                    self.debug_prints("enviando confirmacion anterior")
                     self.socket.sendto(self.last_sent, self.destino)
                     self._send_pack(content)
                 elif parsed.tipo == b"FIN":
-                    print("se ha recibido un mensaje tipo FIN")
-                    # self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+                    self.debug_prints("se ha recibido un mensaje tipo FIN")
                     self.recv_close()
                     return
                 else:
-                    print("mensaje enviado con confirmacion recibida")
                     # TODO: quizas esto debiera ser el largo del mensaje enviado u otro numero que permita verificar
                     self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
                     break
             # caso 2: no se recibe el mensaje de confirmación
             except TimeoutError:
-                print(f"\nerror de timeout en send\ncontenido del mensaje:\ntipo: {msg_tcp.tipo.decode()}\nseq: {int.from_bytes(msg_tcp.seq)}")
+                self.debug_prints(f"error de timeout en send")
         
     def recv(self, buff_size):
         # caso 1: primer mensaje (msg_len)
-        print("recibiendo el largo del mensaje")
-        print(f"seq actual: {int.from_bytes(self.seq)}")
         if self.expecting <= 0:
             try:
                 recvd = self._recv_pack().decode()
@@ -253,11 +243,10 @@ class SocketTCP():
                 else:
                     return self.recv(buff_size)
             except TimeoutError:
-                print("timeout error al recibir largo del mensaje")
+                self.debug_prints("timeout error al recibir largo del mensaje")
                 return self.recv(buff_size)
         # caso 2: continuacion del mensaje
         recv_msg = self.cach
-        print(f"rcv_msg hasta ahora: {recv_msg}")
         pack_len = min(self.expecting, buff_size)
         while pack_len > 0:
             recv_content = self._recv_pack()
@@ -265,38 +254,33 @@ class SocketTCP():
                 self.expecting -= len(recv_content)
                 pack_len -= len(recv_content)
                 recv_msg += recv_content
-                print(f"rcv_msg hasta ahora (dentro de while): {recv_msg}")
         self.cach = recv_msg[buff_size:]
-        print(f"expecting: {self.expecting}")
         return recv_msg[:buff_size]
             
     def _recv_pack(self):
-        print(f"seq actual: {int.from_bytes(self.seq)}")
         try:
             recv_msg, addr = self.socket.recvfrom(self.buf_size)
             parsed = self.parse_segment(recv_msg)
             if parsed.seq <= self.seq:
-                print(f"secuencia incorrecta, {int.from_bytes(parsed.seq)} <= {int.from_bytes(self.seq)}")
-                print("reenviando ultimo mensaje")
+                self.debug_prints(f"secuencia incorrecta, {int.from_bytes(parsed.seq)} <= {int.from_bytes(self.seq)}")
+                self.debug_prints("reenviando ultimo mensaje")
                 self.socket.sendto(self.last_sent, self.destino)
                 return self._recv_pack()
             elif parsed.tipo == b"FIN":
-                print("se ha recibido un mensaje tipo FIN")
-                # self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
+                self.debug_prints("se ha recibido un mensaje tipo FIN")
                 self.recv_close()
                 return
             elif parsed.tipo != b"MSG":
-                print(f"tipo incorrecto, recibido: {parsed.tipo}")
+                self.debug_prints(f"tipo incorrecto, recibido: {parsed.tipo}")
                 return
             else:
                 self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
                 to_send = self.create_segment(MensajeTCP(b"ACK", self.seq))
                 self.socket.sendto(to_send, self.destino)
                 self.last_sent = to_send
-                print(f"contenido recibido: {parsed.msg.decode()}")
                 return parsed.msg
         except TimeoutError:
-            print("error de timeout en recv")
+            self.debug_prints("error de timeout en recv")
             return self._recv_pack()
 
     def close(self):
@@ -304,36 +288,33 @@ class SocketTCP():
         tries = 0
         while tries < 3:
             try:
-                print(f"enviando mensaje fin")
-                print(f"{to_send}")
+                self.debug_prints(f"enviando mensaje fin")
                 self.socket.sendto(to_send, self.destino)
                 recv_msg, _ = self.socket.recvfrom(self.buf_size)
                 parsed = self.parse_segment(recv_msg)
-                print(f"tipo: {parsed.tipo}, seqs: {int.from_bytes(self.seq)} < {int.from_bytes(parsed.seq)}")
                 if parsed.tipo == b"A+F":
-                    print("mensaje tipo A+F recibido")
                     self.seq = (int.from_bytes(parsed.seq) + 1).to_bytes(2)
                     break
 
             except TimeoutError:
-                print("timeout en fin")
+                self.debug_prints("error de timeout en fin")
                 tries += 1
             
         if tries < 3:
             tries = 0
             to_send = self.create_segment(MensajeTCP(b"ACK", self.seq))
-            print(f"{to_send}")
+            self.debug_prints("mensaje de confirmacion de fin de comunicacion junto a solicitud fin recibido, enviando confirmacion devuelta")
 
         while tries < 3:
             try:
                 self.socket.sendto(to_send, self.destino)
-                print("mensaje enviado")
+                self.debug_prints("mensaje enviado")
                 self.socket.recvfrom(self.buf_size)
             except TimeoutError:
                 tries += 1
-                print(f"timeout error en close, intento # {tries}")
+                self.debug_prints(f"timeout error en close, intento # {tries}")
             except:
-                print("otro error en close, quizas el socket ya se cerró??")
+                self.debug_prints("otro error en close, quizas el socket ya se cerró??")
                 break
 
         self.socket.close()
@@ -343,20 +324,22 @@ class SocketTCP():
         tries = 0
         while tries < 3:
             try:
-                print("enviando mensaje tipo A+F")
-                print(f"{to_send}")
+                self.debug_prints("enviando mensaje tipo A+F")
                 self.socket.sendto(to_send, self.destino)
                 recv_msg, _ = self.socket.recvfrom(self.buf_size)
                 parsed = self.parse_segment(recv_msg)
-                print(f"tipo: {parsed.tipo}, seqs: {int.from_bytes(self.seq)} < {int.from_bytes(parsed.seq)}")
                 if parsed.tipo == b"ACK" and self.seq < parsed.seq:
-                    print("mensaje tipo ACK recibido")
+                    self.debug_prints("mensaje tipo ACK recibido")
                     break
             except TimeoutError:
-                print("timeout error en recv_close")
+                self.debug_prints("timeout error en recv_close")
                 tries += 1
             except: 
-                print("otro error en close, quizas el socket ya se cerró??")
+                self.debug_prints("otro error en close, quizas el socket ya se cerró??")
                 break
 
         self.socket.close()
+
+    def debug_prints(self, msg: str):
+        if self.debug == True:
+            print(msg)
