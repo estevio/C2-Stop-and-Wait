@@ -235,7 +235,7 @@ class SocketTCP():
         
     def recv(self, buff_size):
         # caso 1: primer mensaje (msg_len)
-        if self.expecting <= 0:
+        if self.expecting <= 0 and len(self.cach) == 0:
             try:
                 recvd = self._recv_pack()
                 if recvd is not None:
@@ -257,6 +257,10 @@ class SocketTCP():
                 self.expecting -= len(recv_content)
                 pack_len -= len(recv_content)
                 recv_msg += recv_content
+        if self.expecting == 0 and len(self.cach) == 0:
+            msg, _ = self.socket.recvfrom(self.buf_size)
+            if self.parse_segment(msg).tipo == b"FIN":
+                self.recv_close()
         self.cach = recv_msg[buff_size:]
         return recv_msg[:buff_size]
             
