@@ -23,7 +23,7 @@ if __name__ == "__main__":
     print("Cerrando Socket")
     client_socket.close()
 
-    print("confirmando cierre (se espera un error)")
+    print("confirmando cierre")
     try:
         client_socket.send(message)
     except Exception as e:
