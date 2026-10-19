@@ -40,7 +40,7 @@ if __name__ == "__main__":
     print("Conexion establecida")
 
     print("Reciebiendo mensaje completo")
-    recv_message = recieve_full_message(new_socket, 19, end_sequence)
+    recv_message = recieve_full_message(new_socket, 16, end_sequence)
     print(f"\n -> Se ha recibido el seguiente mensaje:\n{recv_message}\n")
 
     print("confirmando cierre")
