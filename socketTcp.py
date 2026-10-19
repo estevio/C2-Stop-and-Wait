@@ -258,9 +258,12 @@ class SocketTCP():
                 pack_len -= len(recv_content)
                 recv_msg += recv_content
         if self.expecting == 0 and len(self.cach) == 0:
-            msg, _ = self.socket.recvfrom(self.buf_size)
-            if self.parse_segment(msg).tipo == b"FIN":
-                self.recv_close()
+            try:
+                msg, _ = self.socket.recvfrom(self.buf_size)
+                if self.parse_segment(msg).tipo == b"FIN":
+                    self.recv_close()
+            except TimeoutError:
+                self.debug_prints("Error de timeout al esperar mensaje fin dentro de recv")
         self.cach = recv_msg[buff_size:]
         return recv_msg[:buff_size]
             
